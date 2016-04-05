@@ -1,0 +1,245 @@
+Advanced Database Systems - Project2
+
+
+Files
+-----
+README						- this file
+transcript_infobox.txt		- transcript of infobox
+transcript_question.txt		- transcript of questions
+src\run.sh					- running program script
+src\adbtwo.py				- interface of the program
+src\infobox.py				- create infobox
+src\question.py				- answer questions
+src\util.py					- common utilities
+
+
+How to run
+----------
+1. Move to src directory:
+	$ cd src
+2. Add execution permission to run.sh in case you don't have:
+	$ chmod +x run.sh
+3. There are four ways to run the program. 
+	(1) ./run.sh -key <Freebase API key> -q <query> -t <infobox|question>
+	(2) ./run.sh -key <Freebase API key> -f <file of queries> -t <infobox|question>
+	(3) ./run.sh -key <Freebase API key>
+	(4) ./run.sh
+
+	Note: 
+		(1) and (2) run in explicit mode.
+		(3) and (4) run in interactive mode.
+		(4) uses the default API key.
+
+
+Internal Design(Part 1)
+---------------
+* Extract Value
+We treat all actual values as string and encode using utf-8.
+And we use 'text' as the actual value, except for 'Description', which uses 'value'.
+util.getContent extracts values from freebase results and stores in a list: ['Libby Gates', 'Kristi Gates'].
+If the required value type is "compound", then it retrieves the corresponding information and stores as a three
+dimensional list:[[['organization1'], ['role1'], ['title1'], ['from1'], ['to1']], [['organization2'], ['role2'],
+['title2], ['from2'], ['to2']]].
+We remove the 'empty' two-dimensional list: [[],[]], in order to guarantee storing valid information.
+
+* Format String
+util.formatTitle and util.formatLine format strings such that it can be nicely displayed.
+util.formatLine supports two mode: single and multile. In single line mode, only one line is permitted. If the size of
+the string exceeds max line width, then the string will be cutted and appended '...'. This function will return a
+string. In multiple line mode, a long string is firstly splitted into words, and then append each word to the current
+line. If exceeds max line width, it appends the word to a new line. This function will return a list of strings.
+
+* Sort and Display
+Before display anything, we sort the entity types and properties in our defined order.
+All empty values are not displayable, except for some special condition, 
+e.g. empty property 'to' is displayed as 'now' sometimes.
+The header line is formed as 'entity name + (entity types)'. Only 'Person' is not displayable.
+Then print each formatted non-empty property.
+
+* Type and Property
+In our design, there are three basic types, Person, League, and SportsTeam.
+Only Person has sub types: Author, Actor, and BusinessPerson.
+A entity can only be one of the three basic types.
+A Person entity can have none, one or multiple sub types of Person.
+Each type (basic and sub type) has its corresponding specific properties.
+Name and Description are common properties that all the three basic types have.
+
+* Search
+We firstly input the query to the Freebase Search API to get the 20 ranked mids. If no result, then stop.
+Then we input each mid to the Freebase Topic API to check if it is one of our three basic types. If it is, then display
+the infobox of this mid. Otherwise, continue to the next mid. If no mids are of the three basic types, stop.
+
+* Map Table
+The map table of mapping Freebase Entity Type to Type of Entity for our Project is the same as that in the online
+project2 description.
+The Freebase Property to Property of interest is shown as follows. Comments briefly expalins how we retrieve and store
+this information.
+ -------------------------------------------------------------------------------------------------------------------
+| Freebase Property					| Property of interest						| Comments							|
+ -------------------------------------------------------------------------------------------------------------------
+| Person.Name						| /type/object/name							| a name string						|
+ -------------------------------------------------------------------------------------------------------------------
+| Person.Description				| /common/topic/description					| just take the first description	|
+ -------------------------------------------------------------------------------------------------------------------
+| Person.Birthday					| /people/person/date_of_birth				| a date format string				|
+ -------------------------------------------------------------------------------------------------------------------
+| Person.PlaceOfBirth				| /people/person/place_of_birth				| a string							|
+ -------------------------------------------------------------------------------------------------------------------
+| Person.Death						| /people/deceased_person/place_of_death	| concatenate strings as			|
+|									| /people/deceased_person/date_of_death		| $date @ $place, cause:($causes)	|
+|									| /people/deceased_person/cause_of_death	| store as a string					|
+ -------------------------------------------------------------------------------------------------------------------
+| Person.Siblings					| /people/person/sibling_s					| list of name strings				|
+|									| /people/sibling_relationship/sibling		| for each value in .../sibling_s	|
+|									|											| retrieve .../sibling ['text']		|
+ -------------------------------------------------------------------------------------------------------------------
+| Person.Spouses					| /people/person/spouse_s					| list of concatenated strings		|
+|									| /people/marriage/spouse					| concatenate strings as			|
+|									| /people/marriage/from						| $spouse ($from - $to) @ $place	|
+|									| /people/marriage/to						| replace $to with 'now' accordingly|
+|									| /people/marriage/location_of_ceremony		|									|
+ -------------------------------------------------------------------------------------------------------------------
+| Author.Books						| /book/author/works_written				| list of book name strings			|
+ -------------------------------------------------------------------------------------------------------------------
+| Author.BooksAbout					| /book/book_subject/works					| list of book name strings			|
+ -------------------------------------------------------------------------------------------------------------------
+| Author.Influenced					| /influence/influence_node/influenced		| list of name strings				|
+ -------------------------------------------------------------------------------------------------------------------
+| Author.InfluencedBy				| /influence/influence_node/influenced_by	| list of name strings				|
+ -------------------------------------------------------------------------------------------------------------------
+| Actor.Films						| /film/actor/film							| list of films						|
+|									| /film/performance/film					| each film is a list:				|
+|									| /film/performance/character				|	[[film_name], [character]]		|
+ -------------------------------------------------------------------------------------------------------------------
+| BusinessPerson.Name				| /type/object/name							| a name string						|
+ -------------------------------------------------------------------------------------------------------------------
+| BusinessPerson.Description		| /common/topic/description					| just the first description		|					
+ -------------------------------------------------------------------------------------------------------------------
+| BusinessPerson.Leadership			| /business/board_member/leader_of			| a list of leaderships				|
+|									| /organization/leadership/organization		| each leadership is a list:		|
+|									| /organization/leadership/role				| [									|
+|									| /organization/leadership/title			|  [org_name], [role], [title],		|
+|									| /organization/leadership/from				|  [from], [to]						|
+|									| /organization/leadership/to				| ]									|
+ -------------------------------------------------------------------------------------------------------------------
+| BusinessPerson.BoardMember		| /business/board_member/organization_board_memberships		| similar as		|
+|									| /organization/organization_board_membership/organization	| leadership		|
+|									| /organization/organization_board_membership/role			|					|
+|									| /organization/organization_board_membership/title			|					|
+|									| /organization/organization_board_membership/from			|					|
+|									| /organization/organization_board_membership/to			|					|
+ -------------------------------------------------------------------------------------------------------------------
+| BusinessPerson.Founded			| /organization/organization_founder/organizations_founded	| list of strings 	|
+ -------------------------------------------------------------------------------------------------------------------
+| League.Name						| /type/object/name							| a name string						|
+ -------------------------------------------------------------------------------------------------------------------
+| League.Description				| /common/topic/description					| just take the first description	|					
+ -------------------------------------------------------------------------------------------------------------------
+| League.Sport						| /sports/sports_league/sport				| a string concatenated by ', ' 	|
+ -------------------------------------------------------------------------------------------------------------------
+| League.Slogan						| /organization/organization/slogan			| a string concatenated by ', '		|
+ -------------------------------------------------------------------------------------------------------------------
+| League.Championship				| /sports/sports_league/championship		| similar as slogan					|
+ -------------------------------------------------------------------------------------------------------------------
+| League.OfficialWebsite			| /common/topic/official_website			| similar as slogan					|
+ -------------------------------------------------------------------------------------------------------------------
+| League.Teams						| /sports/sports_league/teams				| a list of team name strings		|
+|									| /sports/sports_league_participation/team	| retrieve team name from value of	|
+|									|											| .../teams by key '.../team' 		|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Name					| /type/object/name							| a name string						|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Description			| /common/topic/description					| just take the first description	|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Sport					| /sports/sports_team/sport					| a string concatenated by ', '		|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Arena					| /sports/sports_team/arena_stadium			| similar as sport					|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Founded				| /sports/sports_team/founded				| similar as sport					|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Locations				| /sports/sports_team/location				| a list of strings					|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Championships			| /sports/sports_team/championships			| a list of strings					|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Leagues				| /sports/sports_team/league				| a list of league name strings		|
+|									| /sports/sports_league_participation/league|									|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.Coaches				| /sports/sports_team/coaches				| similar as						|
+|									| /sports/sports_team_coach_tenure/coach	|	 BusinessPerson.Leadership		|
+|									| /sports/sports_team_coach_tenure/position	|									|
+|									| /sports/sports_team_coach_tenure/from		|									|
+|									| /sports/sports_team_coach_tenure/to		|									|
+ -------------------------------------------------------------------------------------------------------------------
+| SportsTeam.PlayersRoster			| /sports/sports_team/roster				| similar as						|
+|									| /sports/sports_team_roster/player			|	BusinessPerson.Leadership		|
+|									| /sports/sports_team_roster/number			|									|
+|									| /sports/sports_team_roster/position		|									|
+|									| /sports/sports_team_roster/from			|									|
+|									| /sports/sports_team_roster/to				|									|
+ -------------------------------------------------------------------------------------------------------------------
+
+Internal Design(Part 2)
+---------------
+* Search 
+We use MQLRead API to send MQL queries to Freebase. In the question of "Who created [x]".
+We defined the queries separately as followings:
+
+1. [{
+	"/book/author/works_written": [{
+		"a:name": null,
+		"name~=": "[x]"
+	}],
+	"id": null,
+	"name": null,
+	"type": "/book/author"
+}]
+
+2. [{
+	"/organization/organization_founder/organizations_founded": [{
+		"a:name": null,
+		"name~=": "[x]"
+	}],
+	"id": null,
+	"name": null,
+	"/organization/organization_founder"
+}]
+
+For the names we got by MQL1, we labelled as (as Author) and for those from MQL2, we labelled as (as Businessperson).
+We mapped names and their book or established institution using a hashMap with one key multiple values, and print 
+them alphabetically.
+The following is the table we used to map from Freebase properties to the entities of interest that we return.
+
+* Map Table
+ -------------------------------------------------------------------------------------------------------------------
+| Freebase Property		| Property of interest										| Comments						|
+ -------------------------------------------------------------------------------------------------------------------
+| Author.Name			| /book/author												| I used the "name" tag			|
+|						|															| (string format) from the entry|		
+ -------------------------------------------------------------------------------------------------------------------
+| Author.Books			| /book/author/works_written								| All "a:name" tag from the		|
+|						|															| array of values were used		|
+ -------------------------------------------------------------------------------------------------------------------
+| BusinessPerson.Name	| /organization/organization_founder/organizations_founded	| The "name" tag (string format)|
+|						|															| was used from the entry		|                
+ -------------------------------------------------------------------------------------------------------------------
+| BusinessPerson.Founded| /organization/organization_founder						| All "a:name" tags from the	|
+|						|															| array of values were used 	|
+ -------------------------------------------------------------------------------------------------------------------
+
+ * Format String
+The result output was finally formatted as tables with three columns. The total width of the table is 105 characters. 
+The width of the first column was defined as as the maximal length of author names. Both width of second and third
+columns were set as (105-length(first_colum))/2. In this way, the  width of first column will be automatically adjusted 
+according to different input author name.
+
+
+Freebase API Key and Limit
+--------------------------
+Freebase API Key: 				AIzaSyD-DxMBEDLEzKmCW5yWoyJ8gbMUO0_bXuY
+Requests per second per user:	10
+
+
+Test
+----
+We used linux's dictwords as query to test our program at CLIC machine.
+It worked nicely.
